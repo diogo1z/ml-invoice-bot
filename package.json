@@ -1,0 +1,33 @@
+{
+  "name": "ml-invoice-whatsapp",
+  "version": "1.0.0",
+  "description": "Automate invoice generation for Mercado Livre sold orders and send them to a WhatsApp group",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "tsx src/index.ts",
+    "typecheck": "tsc --noEmit",
+    "orders": "tsx src/fetch-orders.ts"
+  },
+  "keywords": [
+    "mercado-livre",
+    "invoice",
+    "whatsapp"
+  ],
+  "author": "",
+  "license": "MIT",
+  "type": "commonjs",
+  "dependencies": {
+    "dotenv": "^17.4.2",
+    "pdfkit": "^0.20.2",
+    "qrcode-terminal": "^0.12.0",
+    "whatsapp-web.js": "^1.34.7"
+  },
+  "devDependencies": {
+    "@types/node": "^26.4.1",
+    "@types/pdfkit": "^0.17.6",
+    "@types/qrcode-terminal": "^0.12.2",
+    "tsx": "^4.23.13",
+    "typescript": "^7.0.2"
+  }
+}
