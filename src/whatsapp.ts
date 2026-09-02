@@ -66,7 +66,7 @@ export async function sendInvoiceToWhatsApp(filePath: string, caption: string): 
   }
   const media = MessageMedia.fromFilePath(filePath);
   const message = await waClient.sendMessage(groupId, media, { caption });
-  return message.id._serialized;
+  return safeMessageId(message);
 }
 
 /**
@@ -99,5 +99,25 @@ export async function sendTestMessage(text: string): Promise<string> {
     );
   }
   const message = await waClient.sendMessage(groupId, text);
-  return message.id._serialized;
+  return safeMessageId(message);
+}
+
+function safeMessageId(message: { id?: { _serialized?: string; $1?: string } }): string {
+  return message.id?._serialized ?? (message.id as any)?.$1 ?? '';
+}
+
+/**
+ * Shut down the WhatsApp client and its underlying browser. Call this on exit
+ * so the puppeteer browser is killed and the session dir is not left locked,
+ * which otherwise makes the next run fail with "browser is already running".
+ */
+export async function destroyClient(): Promise<void> {
+  if (!client) return;
+  try {
+    await client.destroy();
+  } catch (err) {
+    console.error('Error shutting down WhatsApp client:', err);
+  } finally {
+    client = undefined;
+  }
 }

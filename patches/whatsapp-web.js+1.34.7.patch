@@ -1,0 +1,111 @@
+diff --git a/node_modules/whatsapp-web.js/src/util/Injected/Utils.js b/node_modules/whatsapp-web.js/src/util/Injected/Utils.js
+index 540078a..b59399c 100644
+--- a/node_modules/whatsapp-web.js/src/util/Injected/Utils.js
++++ b/node_modules/whatsapp-web.js/src/util/Injected/Utils.js
+@@ -834,6 +834,19 @@ exports.LoadUtils = () => {
+             });
+         }
+ 
++        // The current WhatsApp Web build renamed `_serialized` to `$1` on message
++        // ids. Restore `_serialized` here so consumers of `msg.id._serialized`
++        // (including this library's own Message structure) keep working.
++        if (
++            typeof msg.id === 'object' &&
++            msg.id._serialized == null &&
++            msg.id.$1 != null
++        ) {
++            msg.id = Object.assign({}, msg.id, {
++                _serialized: msg.id.$1,
++            });
++        }
++
+         delete msg.pendingAckUpdate;
+ 
+         return msg;
+@@ -919,10 +932,20 @@ exports.LoadUtils = () => {
+ 
+     window.WWebJS.getChats = async () => {
+         const chats = window.require('WAWebCollections').Chat.getModelsArray();
+-        const chatPromises = chats.map((chat) =>
+-            window.WWebJS.getChatModel(chat),
+-        );
+-        return await Promise.all(chatPromises);
++        // Process each chat individually - one failure should not discard every chat.
++        // The current WhatsApp Web build (2.3000.x) renamed internal fields in a way
++        // that makes chat.serialize() throw for some chats, which used to make the
++        // whole getChats() call fail.
++        const results = [];
++        for (const chat of chats) {
++            try {
++                const model = await window.WWebJS.getChatModel(chat);
++                if (model) results.push(model);
++            } catch {
++                // skip chats that fail serialization (e.g. LID-based group metadata issues)
++            }
++        }
++        return results;
+     };
+ 
+     window.WWebJS.getChannels = async () => {
+@@ -938,6 +961,15 @@ exports.LoadUtils = () => {
+     window.WWebJS.getChatModel = async (chat, { isChannel = false } = {}) => {
+         if (!chat) return null;
+ 
++        // The current WhatsApp Web build renamed `_serialized` to `$1` on ids.
++        // Normalize it so `chat.id._serialized` (and `model.id._serialized`)
++        // continue to work, otherwise WID lookups below get undefined and throw.
++        if (chat.id && typeof chat.id === 'object') {
++            if (chat.id._serialized == null && chat.id.$1 != null) {
++                chat.id = Object.assign({}, chat.id, { _serialized: chat.id.$1 });
++            }
++        }
++
+         const model = chat.serialize();
+         model.isGroup = false;
+         model.isMuted = chat.mute?.expiration !== 0;
+@@ -981,21 +1013,30 @@ exports.LoadUtils = () => {
+ 
+         model.lastMessage = null;
+         if (model.msgs && model.msgs.length) {
+-            const lastMessage = chat.lastReceivedKey
+-                ? window
+-                      .require('WAWebCollections')
+-                      .Msg.get(chat.lastReceivedKey._serialized) ||
+-                  (
+-                      await window
+-                          .require('WAWebCollections')
+-                          .Msg.getMessagesById([
+-                              chat.lastReceivedKey._serialized,
+-                          ])
+-                  )?.messages?.[0]
+-                : null;
+-            lastMessage &&
+-                (model.lastMessage =
+-                    window.WWebJS.getMessageModel(lastMessage));
++            try {
++                const lastKey = chat.lastReceivedKey || {};
++                let lastSerialized =
++                    lastKey._serialized != null
++                        ? lastKey._serialized
++                        : lastKey.$1 != null
++                          ? lastKey.$1
++                          : null;
++                const lastMessage = lastSerialized
++                    ? window.require('WAWebCollections').Msg.get(lastSerialized) ||
++                      (
++                          await window
++                              .require('WAWebCollections')
++                              .Msg.getMessagesById([lastSerialized])
++                      )?.messages?.[0]
++                    : null;
++                lastMessage &&
++                    (model.lastMessage =
++                        window.WWebJS.getMessageModel(lastMessage));
++            } catch {
++                // Preview lookup is non-critical; a failure here should not
++                // discard the whole chat.
++                model.lastMessage = null;
++            }
+         }
+ 
+         delete model.msgs;

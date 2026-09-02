@@ -73,4 +73,22 @@ async function sendTestInvoice(file: string): Promise<void> {
   await sendInvoiceToWhatsApp(file, 'Fatura de teste gerada automaticamente.');
 }
 
+let shuttingDown = false;
+
+async function shutdown(): Promise<void> {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  try {
+    rl.close();
+    const { destroyClient } = await import('./whatsapp.js');
+    await destroyClient();
+  } catch {
+    // ignore
+  }
+  process.exit(0);
+}
+
+process.on('SIGINT', () => void shutdown());
+process.on('SIGTERM', () => void shutdown());
+
 main();
