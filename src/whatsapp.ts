@@ -70,15 +70,6 @@ export async function sendInvoiceToWhatsApp(filePath: string, caption: string): 
 }
 
 /**
- * Fallback that prints a click-to-chat link so the invoice media can be sent
- * manually from a browser/phone when the Web session is unavailable.
- */
-export function printClickToChatFallback(phone: string, caption: string): string {
-  const text = encodeURIComponent(caption);
-  return `https://wa.me/${phone}?text=${text}`;
-}
-
-/**
  * Look up a group chat by id and return its display info.
  */
 export async function getGroupInfo(groupId: string): Promise<{ name: string }> {

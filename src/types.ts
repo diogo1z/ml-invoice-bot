@@ -23,6 +23,9 @@ export interface MercadoLivreOrder {
   currency_id: string;
   buyer: Buyer;
   order_items: OrderItem[];
+  shipping?: {
+    id: number;
+  };
 }
 
 export interface InvoiceData {

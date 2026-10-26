@@ -3,16 +3,30 @@ import path from 'node:path';
 
 dotenv.config();
 
-function required(name: string): string {
-  const value = process.env[name];
-  if (!value) {
-    throw new Error(`Missing required environment variable: ${name}. See .env.example`);
-  }
-  return value;
-}
-
 function optional(name: string, fallback: string): string {
   return process.env[name] ?? fallback;
+}
+
+function list(name: string, fallback = ''): string[] {
+  return (process.env[name] || fallback)
+    .split(',')
+    .map((value) => value.trim())
+    .filter(Boolean);
+}
+
+const localDbPath =
+  process.env.DB_PATH || path.resolve(__dirname, '..', 'data', 'labels.db');
+const dbUrl = process.env.DB_URL || `file:${path.resolve(localDbPath)}`;
+const dbAuthToken = dbUrl.startsWith('file:')
+  ? undefined
+  : process.env.DB_AUTH_TOKEN || undefined;
+
+type DeliveryMode = 'whatsapp' | 'email' | 'both';
+
+function deliveryMode(): DeliveryMode {
+  const value = optional('DELIVERY_MODE', 'whatsapp').toLowerCase();
+  if (value === 'whatsapp' || value === 'email' || value === 'both') return value;
+  throw new Error(`Invalid DELIVERY_MODE "${value}". Use whatsapp, email or both.`);
 }
 
 export const config = {
@@ -22,10 +36,35 @@ export const config = {
     appSecret: process.env.MELI_APP_SECRET as string | undefined,
     refreshToken: process.env.MELI_REFRESH_TOKEN as string | undefined,
   },
-  meliRequired: (): string => required('MELI_ACCESS_TOKEN'),
   ordersDays: parseInt(optional('ORDERS_DAYS', '7'), 10),
   statuses: optional('ORDER_STATUSES', 'paid').split(',').map((s) => s.trim()),
   outputDir: optional('OUTPUT_DIR', path.resolve(__dirname, '..', 'invoices')),
+
+  // How many paid orders to scan when looking for shipments still to send.
+  labelsMaxOrders: parseInt(optional('LABELS_MAX_ORDERS', '300'), 10),
+
+  // SQLite database used to remember which labels were already emailed.
+  // DB_URL points to Turso/libSQL in production; locally it falls back to a file.
+  dbPath: localDbPath,
+  dbUrl,
+  dbAuthToken,
+
+  // Where invoices are delivered: whatsapp, email or both.
+  deliveryMode: deliveryMode(),
+
+  email: {
+    host: process.env.SMTP_HOST,
+    port: parseInt(optional('SMTP_PORT', '587'), 10),
+    secure: optional('SMTP_SECURE', 'false').toLowerCase() === 'true',
+    user: process.env.SMTP_USER,
+    pass: process.env.SMTP_PASS,
+    from: process.env.EMAIL_FROM,
+    to: list('EMAIL_TO'),
+    labelsTo: list(
+      'LABELS_EMAIL_TO',
+      'diogo1z@hotmail.com,mariana_costa019@hotmail.com'
+    ),
+  },
 
   whatsapp: {
     // Group id as "XXXXXXXXX@c.us" or find by name.

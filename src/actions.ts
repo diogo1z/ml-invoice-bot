@@ -1,12 +1,20 @@
-import fs from 'node:fs';
-import path from 'node:path';
 import { MercadoLivreClient, filterByDateAndStatus, toInvoiceData } from './meli';
 import { generateInvoice } from './invoice';
-import { getClient, getGroupInfo, resolveGroupId, sendInvoiceToWhatsApp, sendTestMessage } from './whatsapp';
+import {
+  sendFilesByEmail,
+  sendInvoiceByEmail,
+  sendTestEmail as sendSmtpTestEmail,
+} from './email';
+import { collectPendingShipments, generateLabelPdfs } from './labels';
+import { markLabelsSent } from './db';
 import { config } from './config';
 
 function captionFor(totalAmount: number, currency: string, orderId: string): string {
   return `Fatura do pedido ${orderId}\nTotal: ${currency} ${totalAmount.toFixed(2)}`;
+}
+
+function clickToChatLink(phone: string, caption: string): string {
+  return `https://wa.me/${phone}?text=${encodeURIComponent(caption)}`;
 }
 
 /**
@@ -34,21 +42,53 @@ export async function runFullFlow(): Promise<void> {
     files.push(await generateInvoice(invoice));
   }
 
-  if (!config.whatsapp.useWeb) {
-    console.log('WHATSAPP_MODE=click-to-chat: printing share links instead of sending.\n');
-    return;
+  const sendWhatsApp = config.deliveryMode === 'whatsapp' || config.deliveryMode === 'both';
+  const sendEmail = config.deliveryMode === 'email' || config.deliveryMode === 'both';
+
+  if (sendWhatsApp) {
+    if (!config.whatsapp.useWeb) {
+      console.log('WHATSAPP_MODE=click-to-chat: printing share links instead of sending.');
+      if (config.fallbackNumbers.length === 0) {
+        console.log('Set FALLBACK_NUMBERS to generate click-to-chat links.');
+      } else {
+        for (let i = 0; i < files.length; i++) {
+          const order = recent[i];
+          const caption = captionFor(order.total_amount, order.currency_id, order.id);
+          for (const phone of config.fallbackNumbers) {
+            console.log(`${order.id} (${phone}): ${clickToChatLink(phone, caption)}`);
+          }
+        }
+      }
+    } else {
+      const { sendInvoiceToWhatsApp } = await import('./whatsapp.js');
+      console.log('Connecting to WhatsApp...');
+      for (let i = 0; i < files.length; i++) {
+        const order = recent[i];
+        await sendInvoiceToWhatsApp(
+          files[i],
+          captionFor(order.total_amount, order.currency_id, order.id)
+        );
+        console.log(`Sent invoice for order ${order.id} to WhatsApp`);
+      }
+    }
   }
 
-  console.log('Connecting to WhatsApp...');
-  for (let i = 0; i < files.length; i++) {
-    const order = recent[i];
-    await sendInvoiceToWhatsApp(
-      files[i],
-      captionFor(order.total_amount, order.currency_id, order.id)
-    );
-    console.log(`Sent invoice for order ${order.id}`);
+  if (sendEmail) {
+    console.log('Sending invoices via email...');
+    for (let i = 0; i < files.length; i++) {
+      const order = recent[i];
+      await sendInvoiceByEmail(
+        files[i],
+        `Fatura do pedido ${order.id}`,
+        captionFor(order.total_amount, order.currency_id, order.id)
+      );
+      console.log(`Emailed invoice for order ${order.id} to ${config.email.to.join(', ')}`);
+    }
   }
-  console.log(`Done. ${files.length} invoice(s) sent from ${config.outputDir}\n`);
+
+  console.log(
+    `Done. ${files.length} invoice(s) delivered (mode: ${config.deliveryMode}) from ${config.outputDir}\n`
+  );
 }
 
 /**
@@ -70,6 +110,101 @@ export async function generateTestInvoice(): Promise<string> {
   });
   console.log(`Test invoice generated: ${file}\n`);
   return file;
+}
+
+/**
+ * Send a test email to confirm the SMTP configuration works.
+ */
+export async function testEmailDelivery(): Promise<void> {
+  const to = config.email.to.join(', ');
+  console.log(`\nSending test email to ${to || '(no recipients configured)'}...`);
+  await sendSmtpTestEmail();
+  console.log('Test email sent.\n');
+}
+
+/**
+ * Find paid orders whose shipments still need to be sent, download one PDF per
+ * label and email them. Labels already recorded in the local SQLite database
+ * are skipped, so the same label is never emailed twice.
+ */
+export async function sendLabelsByEmail(): Promise<void> {
+  console.log('\nChecking Mercado Livre for paid orders with pending shipments...');
+  const meli = new MercadoLivreClient();
+  const orders = await meli.fetchPaidOrders(config.labelsMaxOrders);
+  const result = await collectPendingShipments(orders, meli);
+
+  console.log(`Paid orders checked: ${result.totalPaidOrders}`);
+  console.log(`Already sent: ${result.alreadySent}`);
+  console.log(`Not ready to ship: ${result.notReady}`);
+  console.log(`Without shipping info: ${result.withoutShipping}`);
+  if (result.errors > 0) {
+    console.log(`Errors while checking shipments: ${result.errors}`);
+  }
+  console.log(`Orders still to ship: ${result.pending.length}`);
+
+  if (result.pending.length === 0) {
+    console.log('No new labels to send.\n');
+    return;
+  }
+
+  console.log(`Downloading ${result.pending.length} label(s), one PDF per order...`);
+  const labels = await generateLabelPdfs(result.pending, meli);
+  if (labels.length === 0) {
+    console.log('Could not generate any labels. Nothing sent.\n');
+    return;
+  }
+
+  const to = config.email.labelsTo.join(', ');
+  const orderIds = labels.map((label) => label.orderId).join(', ');
+  const subject = `Etiquetas de envio - ${labels.length} pedido(s) para enviar`;
+  const body = [
+    `Pedidos a serem enviados: ${labels.length}`,
+    `Pedidos: ${orderIds}`,
+    '',
+    'As etiquetas estão em anexo, uma por pedido.',
+  ].join('\n');
+
+  console.log(`Sending ${labels.length} separate label PDF(s) to ${to}...`);
+  await sendFilesByEmail(
+    labels.map((label) => label.filePath),
+    subject,
+    body,
+    config.email.labelsTo
+  );
+
+  await markLabelsSent(
+    labels.map((label) => ({
+      shipmentId: label.shipmentId,
+      orderId: label.orderId,
+      labelFile: label.filePath,
+      emailTo: to,
+    }))
+  );
+
+  console.log(`Email sent. ${labels.length} label(s) marked as sent in the database.\n`);
+}
+
+/**
+ * Print how many paid orders still have labels to be sent, without sending.
+ */
+export async function listPendingLabels(): Promise<void> {
+  const meli = new MercadoLivreClient();
+  const orders = await meli.fetchPaidOrders(config.labelsMaxOrders);
+  const result = await collectPendingShipments(orders, meli);
+
+  console.log('\nMercado Livre label status');
+  console.log(`- Paid orders checked: ${result.totalPaidOrders}`);
+  console.log(`- Already sent: ${result.alreadySent}`);
+  console.log(`- Not ready to ship: ${result.notReady}`);
+  console.log(`- Without shipping info: ${result.withoutShipping}`);
+  if (result.errors > 0) {
+    console.log(`- Errors while checking shipments: ${result.errors}`);
+  }
+  console.log(`- Orders still to ship: ${result.pending.length}`);
+  for (const shipment of result.pending) {
+    console.log(`  * order ${shipment.orderId} (shipment ${shipment.shipmentId})`);
+  }
+  console.log();
 }
 
 /**
@@ -97,6 +232,9 @@ export async function setupWhatsApp(ask: (q: string) => Promise<string>): Promis
   console.log('If a QR code appears, scan it with your phone:');
   console.log('  WhatsApp > Settings (gear) > Linked devices > Link a device\n');
 
+  const { getClient, getGroupInfo, resolveGroupId, sendTestMessage } = await import(
+    './whatsapp.js'
+  );
   const waClient = await getClient();
   console.log('WhatsApp is linked and ready.\n');
 

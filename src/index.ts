@@ -1,16 +1,27 @@
 import readline from 'node:readline/promises';
 import { stdin as input, stdout as output } from 'node:process';
-import { runFullFlow, generateTestInvoice, listRecentOrders, setupWhatsApp } from './actions';
+import {
+  runFullFlow,
+  generateTestInvoice,
+  listRecentOrders,
+  setupWhatsApp,
+  testEmailDelivery,
+  sendLabelsByEmail,
+  listPendingLabels,
+} from './actions';
 
 const rl = readline.createInterface({ input, output });
 
 function printMenu(): void {
-  console.log('\n=== Mercado Livre → Invoice → WhatsApp ===');
+  console.log('\n=== Mercado Livre → Faturas & Etiquetas ===');
   console.log(' 1) Setup WhatsApp (link QR code, check group, test)');
   console.log(' 2) Run full flow (orders → invoices → send to group)');
   console.log(' 3) Generate test invoice (no ML keys needed)');
   console.log(' 4) List recent orders (needs ML keys)');
   console.log(' 5) Send a test invoice to the WhatsApp group');
+  console.log(' 6) Send a test email (needs SMTP config)');
+  console.log(' 7) Send shipping labels by email');
+  console.log(' 8) Show how many orders still need shipping labels');
   console.log(' 0) Exit');
 }
 
@@ -59,6 +70,15 @@ async function main(): Promise<void> {
           }
           break;
         }
+        case '6':
+          await testEmailDelivery();
+          break;
+        case '7':
+          await sendLabelsByEmail();
+          break;
+        case '8':
+          await listPendingLabels();
+          break;
         default:
           console.log(`Unknown option "${choice}". Try again.`);
       }
