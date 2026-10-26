@@ -24,6 +24,34 @@ function recipients(to: string[]): string {
   return to.join(', ');
 }
 
+function normalizeAddress(value: unknown): string {
+  if (typeof value === 'string') return value.trim().toLowerCase();
+  if (value && typeof value === 'object' && 'address' in value) {
+    return String((value as { address: unknown }).address).trim().toLowerCase();
+  }
+  return String(value).trim().toLowerCase();
+}
+
+function assertAllRecipientsAccepted(
+  info: { accepted?: unknown; rejected?: unknown },
+  to: string[]
+): void {
+  if (!Array.isArray(info.accepted) && !Array.isArray(info.rejected)) return;
+
+  const accepted = new Set(
+    (Array.isArray(info.accepted) ? info.accepted : []).map(normalizeAddress)
+  );
+  const rejected = (Array.isArray(info.rejected) ? info.rejected : []).map(
+    normalizeAddress
+  );
+  const missing = to.map(normalizeAddress).filter((address) => !accepted.has(address));
+
+  if (missing.length > 0) {
+    const details = rejected.length > 0 ? ` Rejected: ${rejected.join(', ')}.` : '';
+    throw new Error(`Email was not accepted for: ${missing.join(', ')}.${details}`);
+  }
+}
+
 /**
  * Send one or more PDF files as attachments in a single email.
  */
@@ -38,7 +66,7 @@ export async function sendFilesByEmail(
   }
 
   const transporter = createTransport();
-  await transporter.sendMail({
+  const info = await transporter.sendMail({
     from: config.email.from ?? config.email.user,
     to: recipients(to),
     subject,
@@ -49,6 +77,7 @@ export async function sendFilesByEmail(
       contentType: 'application/pdf',
     })),
   });
+  assertAllRecipientsAccepted(info, to);
 }
 
 /**
