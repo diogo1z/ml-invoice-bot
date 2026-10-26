@@ -28,7 +28,7 @@ function formatDate(iso: string, timezone: string): string {
 export async function generateInvoice(invoice: InvoiceData): Promise<string> {
   fs.mkdirSync(config.outputDir, { recursive: true });
 
-  const safeId = invoice.orderId.replace(/[^a-zA-Z0-9_-]/g, '');
+  const safeId = String(invoice.orderId).replace(/[^a-zA-Z0-9_-]/g, '');
   const filePath = path.join(config.outputDir, `invoice-${safeId}.pdf`);
 
   const doc = new PDFDocument({ size: 'A4', margin: 50 });

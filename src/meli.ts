@@ -4,6 +4,11 @@ import type { MercadoLivreOrder } from './types';
 const MELI_API = 'https://api.mercadolibre.com';
 const MELI_AUTH = 'https://api.mercadolibre.com/oauth/token';
 
+function normalizeOrder(order: MercadoLivreOrder): MercadoLivreOrder {
+  // The API may return order ids as numbers; normalize them to strings.
+  return { ...order, id: String(order.id) };
+}
+
 export class MercadoLivreClient {
   private accessToken = config.meli.accessToken;
 
@@ -83,7 +88,7 @@ export class MercadoLivreClient {
     const data = await this.request<{ results: MercadoLivreOrder[] }>(
       `/orders/search?seller=${me.id}&sort=date_desc&limit=${limit}&offset=${offset}`
     );
-    return data.results;
+    return data.results.map(normalizeOrder);
   }
 
   /**
@@ -100,7 +105,7 @@ export class MercadoLivreClient {
         `/orders/search?seller=${me.id}&order.status=paid&sort=date_desc` +
           `&limit=${pageSize}&offset=${offset}`
       );
-      all.push(...data.results);
+      all.push(...data.results.map(normalizeOrder));
       if (data.results.length < pageSize) break;
     }
 

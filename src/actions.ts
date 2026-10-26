@@ -149,9 +149,12 @@ export async function sendLabelsByEmail(): Promise<void> {
 
   console.log(`Downloading ${result.pending.length} label(s), one PDF per order...`);
   const labels = await generateLabelPdfs(result.pending, meli);
+  const failed = result.pending.length - labels.length;
   if (labels.length === 0) {
-    console.log('Could not generate any labels. Nothing sent.\n');
-    return;
+    throw new Error(`Could not generate any labels (${failed} failed). Nothing sent.`);
+  }
+  if (failed > 0) {
+    console.log(`Warning: ${failed} label(s) could not be generated; they will be retried.`);
   }
 
   const to = config.email.labelsTo.join(', ');
@@ -182,6 +185,12 @@ export async function sendLabelsByEmail(): Promise<void> {
   );
 
   console.log(`Email sent. ${labels.length} label(s) marked as sent in the database.\n`);
+  if (failed > 0) {
+    throw new Error(
+      `${failed} label(s) could not be generated. ` +
+        'The successful ones were sent; the rest will be retried.'
+    );
+  }
 }
 
 /**

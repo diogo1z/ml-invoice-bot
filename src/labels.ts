@@ -88,7 +88,7 @@ export async function generateLabelPdfs(
   for (const shipment of shipments) {
     try {
       const pdf = await meli.fetchShipmentLabels([shipment.shipmentId]);
-      const safeOrderId = shipment.orderId.replace(/[^a-zA-Z0-9_-]/g, '');
+      const safeOrderId = String(shipment.orderId).replace(/[^a-zA-Z0-9_-]/g, '');
       const filePath = path.join(
         config.outputDir,
         `label-${safeOrderId}-${shipment.shipmentId}.pdf`
