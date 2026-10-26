@@ -156,7 +156,10 @@ export async function sendLabelsByEmail(): Promise<void> {
   const labels = await generateLabelPdfs(result.pending, meli);
   const failed = result.pending.length - labels.length;
   if (labels.length === 0) {
-    throw new Error(`Could not generate any labels (${failed} failed). Nothing sent.`);
+    console.log('No printable labels available right now.');
+    console.log('This usually means shipments were already dropped off/shipped or are not printable.');
+    console.log('Nothing sent.\n');
+    return;
   }
   if (failed > 0) {
     console.log(`Warning: ${failed} label(s) could not be generated; they will be retried.`);
@@ -206,10 +209,11 @@ export async function sendLabelsByEmail(): Promise<void> {
 
   console.log(`Email sent. ${labels.length} label(s) marked as sent in the database.\n`);
   if (failed > 0) {
-    throw new Error(
+    console.log(
       `${failed} label(s) could not be generated. ` +
         'The successful ones were sent; the rest will be retried.'
     );
+    return;
   }
 }
 
