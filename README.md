@@ -55,9 +55,10 @@ lock file evita duas execuções simultâneas na mesma máquina.
    npm run pending   # só conta, não envia
    npm run labels    # baixa e envia as pendentes
    ```
-3. Para rodar 4x/dia (08h, 09h, 12h e 13h), adicione ao `crontab -e`:
+3. Para rodar 7x/dia (07h, 08h, 10h30, 11h30, 14h, 15h e 16h), adicione ao `crontab -e`:
    ```cron
-   0 8,9,12,13 * * * cd /home/diogo/Repositorio/ml && mkdir -p logs && /usr/bin/npm run labels >> logs/labels.log 2>&1
+   0 7,8,14,15,16 * * * cd /home/diogo/Repositorio/ml && mkdir -p logs && /usr/bin/npm run labels >> logs/labels.log 2>&1
+   30 10,11 * * * cd /home/diogo/Repositorio/ml && mkdir -p logs && /usr/bin/npm run labels >> logs/labels.log 2>&1
    ```
 
 > O cron local usa o fuso da máquina e o `npm` precisa estar no `PATH`. Se usar
@@ -65,10 +66,11 @@ lock file evita duas execuções simultâneas na mesma máquina.
 > estiver desligado, a execução não acontece — por isso a opção 2 é mais confiável.
 
 ### Opção 2 — GitHub Actions (nuvem, grátis)
-O workflow `.github/workflows/labels.yml` roda **08h, 09h, 12h e 13h**
-(America/Sao_Paulo), com redundância de 1h entre as tentativas, e também pode
-ser disparado manualmente em **Actions → Send shipping labels → Run workflow**.
-Em UTC os horários são 11:00, 12:00, 15:00 e 16:00.
+O workflow `.github/workflows/labels.yml` roda **07h, 08h, 10h30, 11h30, 14h,
+15h e 16h** (America/Sao_Paulo), com tentativas redundantes ao longo do dia, e
+também pode ser disparado manualmente em
+**Actions → Send shipping labels → Run workflow**.
+Em UTC os horários são 10:00, 11:00, 13:30, 14:30, 17:00, 18:00 e 19:00.
 
 1. Crie o banco no [Turso](https://turso.tech) (se ainda não tiver):
    ```bash
@@ -90,7 +92,7 @@ Em UTC os horários são 11:00, 12:00, 15:00 e 16:00.
 4. Faça push do repositório e rode o workflow uma vez para testar.
 
 Repo privado no plano Free tem 2.000 minutos/mês (cada execução usa ~1–3 min;
-4x/dia ≈ 120–360 min/mês). O `npm ci` usa `PUPPETEER_SKIP_DOWNLOAD=true`,
+7x/dia ≈ 210–630 min/mês). O `npm ci` usa `PUPPETEER_SKIP_DOWNLOAD=true`,
 porque labels não usam WhatsApp.
 
 > Use **apenas um agendador por vez**. Se mantiver o cron local e o Actions,
