@@ -100,7 +100,12 @@ describe('toInvoiceData', () => {
         total_amount: 59.9,
         buyer: { id: 1, first_name: 'Ana', last_name: 'Silva', nickname: 'ANA' },
         order_items: [
-          { id: 'item-1', title: 'Item', quantity: 2, unit_price: 29.95, sale_fee: 0 },
+          {
+            item: { id: 'item-1', title: 'Item' },
+            quantity: 2,
+            unit_price: 29.95,
+            sale_fee: 0,
+          },
         ],
       })
     );

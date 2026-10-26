@@ -165,7 +165,7 @@ export async function sendLabelsByEmail(): Promise<void> {
     const order = ordersById.get(label.orderId);
     const items = order?.order_items.length
       ? order.order_items
-          .map((item) => `   - ${item.quantity}x ${item.title}`)
+          .map((item) => `   - ${item.quantity}x ${item.item.title}`)
           .join('\n')
       : '   - (sem itens)';
     return [

@@ -167,7 +167,7 @@ export function toInvoiceData(order: MercadoLivreOrder): import('./types').Invoi
       .trim(),
     buyerNickname: order.buyer?.nickname ?? '',
     items: order.order_items.map((item) => ({
-      title: item.title,
+      title: item.item.title,
       quantity: item.quantity,
       unitPrice: item.unit_price,
       subtotal: item.unit_price * item.quantity,

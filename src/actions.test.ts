@@ -66,8 +66,7 @@ const orderFixture: MercadoLivreOrder = {
   buyer: { id: 1, nickname: 'BUYER' },
   order_items: [
     {
-      id: 'item-1',
-      title: 'Camiseta',
+      item: { id: 'item-1', title: 'Camiseta' },
       quantity: 2,
       unit_price: 29.95,
       sale_fee: 0,
