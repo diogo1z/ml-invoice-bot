@@ -52,7 +52,7 @@ export async function collectPendingShipments(
     try {
       const status = await meli.fetchShipmentStatus(shipmentId);
       if (status === 'ready_to_ship') {
-        pending.push({ orderId: order.id, shipmentId });
+        pending.push({ orderId: String(order.id), shipmentId });
       } else {
         notReady++;
       }

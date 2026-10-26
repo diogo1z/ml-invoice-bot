@@ -32,7 +32,7 @@ function normalizeAddress(value: unknown): string {
   return String(value).trim().toLowerCase();
 }
 
-function assertAllRecipientsAccepted(
+export function assertAllRecipientsAccepted(
   info: { accepted?: unknown; rejected?: unknown },
   to: string[]
 ): void {

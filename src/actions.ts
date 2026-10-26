@@ -1,3 +1,4 @@
+import path from 'node:path';
 import { MercadoLivreClient, filterByDateAndStatus, toInvoiceData } from './meli';
 import { generateInvoice } from './invoice';
 import {
@@ -158,11 +159,26 @@ export async function sendLabelsByEmail(): Promise<void> {
   }
 
   const to = config.email.labelsTo.join(', ');
-  const orderIds = labels.map((label) => label.orderId).join(', ');
+  const ordersById = new Map(orders.map((order) => [String(order.id), order]));
   const subject = `Etiquetas de envio - ${labels.length} pedido(s) para enviar`;
+  const sections = labels.map((label, index) => {
+    const order = ordersById.get(label.orderId);
+    const items = order?.order_items.length
+      ? order.order_items
+          .map((item) => `   - ${item.quantity}x ${item.title}`)
+          .join('\n')
+      : '   - (sem itens)';
+    return [
+      `${index + 1}. Pedido ${label.orderId}`,
+      '   Itens:',
+      items,
+      `   Etiqueta: ${path.basename(label.filePath)} (envio ${label.shipmentId})`,
+    ].join('\n');
+  });
   const body = [
     `Pedidos a serem enviados: ${labels.length}`,
-    `Pedidos: ${orderIds}`,
+    '',
+    sections.join('\n\n'),
     '',
     'As etiquetas estão em anexo, uma por pedido.',
   ].join('\n');

@@ -33,6 +33,8 @@ npm run labels     # download one PDF per pending label and email the fixed reci
 npm run db:migrate # copy sent-label history from local SQLite to Turso
 npm start          # interactive menu (labels, invoices, email tests)
 npm run build      # typecheck + compile to dist/
+npm test           # run the unit tests
+npm run test:watch # run the unit tests in watch mode
 ```
 
 ## Como rodar

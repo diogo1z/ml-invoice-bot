@@ -4,7 +4,7 @@ import type { MercadoLivreOrder } from './types';
 const MELI_API = 'https://api.mercadolibre.com';
 const MELI_AUTH = 'https://api.mercadolibre.com/oauth/token';
 
-function normalizeOrder(order: MercadoLivreOrder): MercadoLivreOrder {
+export function normalizeOrder(order: MercadoLivreOrder): MercadoLivreOrder {
   // The API may return order ids as numbers; normalize them to strings.
   return { ...order, id: String(order.id) };
 }
@@ -157,7 +157,7 @@ export function filterByDateAndStatus(
 
 export function toInvoiceData(order: MercadoLivreOrder): import('./types').InvoiceData {
   return {
-    orderId: order.id,
+    orderId: String(order.id),
     date: order.date_closed ?? order.date_created,
     currency: order.currency_id,
     totalAmount: order.total_amount,

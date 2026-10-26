@@ -4,9 +4,11 @@
   "description": "Automate invoice generation for Mercado Livre sold orders and send them to a WhatsApp group",
   "main": "dist/index.js",
   "scripts": {
-    "build": "tsc",
+    "build": "tsc -p tsconfig.build.json",
     "start": "tsx src/index.ts",
     "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "orders": "tsx src/fetch-orders.ts",
     "labels": "tsx src/send-labels.ts",
     "pending": "tsx src/list-pending.ts",
@@ -36,6 +38,7 @@
     "@types/qrcode-terminal": "^0.12.2",
     "patch-package": "^8.0.1",
     "tsx": "^4.23.13",
-    "typescript": "^7.0.2"
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.5"
   }
 }
