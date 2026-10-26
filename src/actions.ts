@@ -148,6 +148,10 @@ export async function sendLabelsByEmail(): Promise<void> {
     return;
   }
 
+  if (config.email.labelsTo.length === 0) {
+    throw new Error('LABELS_EMAIL_TO is not configured.');
+  }
+
   console.log(`Downloading ${result.pending.length} label(s), one PDF per order...`);
   const labels = await generateLabelPdfs(result.pending, meli);
   const failed = result.pending.length - labels.length;

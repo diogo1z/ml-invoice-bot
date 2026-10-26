@@ -60,10 +60,7 @@ export const config = {
     pass: process.env.SMTP_PASS,
     from: process.env.EMAIL_FROM,
     to: list('EMAIL_TO'),
-    labelsTo: list(
-      'LABELS_EMAIL_TO',
-      'diogo1z@hotmail.com,mariana_costa019@hotmail.com'
-    ),
+    labelsTo: list('LABELS_EMAIL_TO'),
   },
 
   whatsapp: {

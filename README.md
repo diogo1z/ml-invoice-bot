@@ -84,8 +84,8 @@ Em UTC os horários são 10:00, 11:00, 13:30, 14:30, 17:00, 18:00 e 19:00.
    - `MELI_APP_ID`, `MELI_APP_SECRET`
    - `DB_URL` (`libsql://...turso.io`), `DB_AUTH_TOKEN`
    - `SMTP_USER`, `SMTP_PASS`, `EMAIL_FROM`, `EMAIL_TO`
-   - opcionais: `LABELS_EMAIL_TO`, `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`
-   - sem `LABELS_EMAIL_TO`, as etiquetas vão para `diogo1z@hotmail.com` e `mariana_costa019@hotmail.com`
+   - `LABELS_EMAIL_TO` (obrigatório para enviar etiquetas)
+   - opcionais: `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`
 3. Copie o histórico local para o Turso (evita reenviar etiquetas antigas):
    ```bash
    DB_URL='libsql://...' DB_AUTH_TOKEN='...' npm run db:migrate
@@ -122,7 +122,7 @@ See `.env.example` for all options:
 - `SMTP_HOST` / `SMTP_PORT` / `SMTP_SECURE` / `SMTP_USER` / `SMTP_PASS` — SMTP server credentials
 - `EMAIL_FROM` — sender address (defaults to `SMTP_USER`)
 - `EMAIL_TO` — comma-separated recipients for invoices/other emails
-- `LABELS_EMAIL_TO` — comma-separated shipping-label recipients (default `diogo1z@hotmail.com,mariana_costa019@hotmail.com`)
+- `LABELS_EMAIL_TO` — comma-separated shipping-label recipients (required for labels)
 
 ## Segurança
 - `.env` está no `.gitignore` e nunca deve ser commitado.
@@ -131,7 +131,7 @@ See `.env.example` for all options:
 
 ## Notes
 - Invoices are **order summaries**, not fiscal documents (NF-e).
-- `npm run labels` scans paid orders (paginated up to `LABELS_MAX_ORDERS`), finds shipments still `ready_to_ship`, downloads **one PDF per label** and emails them all to `LABELS_EMAIL_TO` (default: `diogo1z@hotmail.com` and `mariana_costa019@hotmail.com`), with the number of orders still to ship in the subject/body. Shipped/delivered shipments are skipped by the API.
+- `npm run labels` scans paid orders (paginated up to `LABELS_MAX_ORDERS`), finds shipments still `ready_to_ship`, downloads **one PDF per label** and emails them all to `LABELS_EMAIL_TO` (required), with the number of orders still to ship in the subject/body. Shipped/delivered shipments are skipped by the API.
 - Successfully emailed shipments are saved in SQLite, so the same label is never sent twice; `npm run pending` shows the current count without sending.
 - Mercado Livre access tokens expire (~6h). Providing `MELI_APP_ID` + `MELI_APP_SECRET` obtains a token automatically via `client_credentials`; adding `MELI_REFRESH_TOKEN` switches to the user-scoped refresh flow.
 - whatsapp-web.js is browser-based automation; it may break if WhatsApp changes their web app. Disable it (`WHATSAPP_MODE=click-to-chat`) to only print share links.

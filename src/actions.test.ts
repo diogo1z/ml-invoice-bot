@@ -77,6 +77,7 @@ const orderFixture: MercadoLivreOrder = {
 
 beforeEach(() => {
   vi.resetAllMocks();
+  mocks.config.email.labelsTo = ['a@test.com', 'b@test.com'];
   mocks.fetchPaidOrders.mockResolvedValue([]);
   mocks.collectPendingShipments.mockResolvedValue(emptyResult);
   mocks.generateLabelPdfs.mockResolvedValue([]);
@@ -88,6 +89,22 @@ describe('sendLabelsByEmail', () => {
   it('does nothing when there are no pending labels', async () => {
     await sendLabelsByEmail();
 
+    expect(mocks.sendFilesByEmail).not.toHaveBeenCalled();
+    expect(mocks.markLabelsSent).not.toHaveBeenCalled();
+  });
+
+  it('fails before downloading when LABELS_EMAIL_TO is not configured', async () => {
+    mocks.config.email.labelsTo = [];
+    mocks.collectPendingShipments.mockResolvedValue({
+      ...emptyResult,
+      totalPaidOrders: 1,
+      pending: [pendingShipment],
+    });
+
+    await expect(sendLabelsByEmail()).rejects.toThrow(
+      'LABELS_EMAIL_TO is not configured.'
+    );
+    expect(mocks.generateLabelPdfs).not.toHaveBeenCalled();
     expect(mocks.sendFilesByEmail).not.toHaveBeenCalled();
     expect(mocks.markLabelsSent).not.toHaveBeenCalled();
   });
