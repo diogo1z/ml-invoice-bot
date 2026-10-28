@@ -53,6 +53,20 @@ export async function collectPendingShipments(
       const status = await meli.fetchShipmentStatus(shipmentId);
       if (status === 'ready_to_ship') {
         pending.push({ orderId: String(order.id), shipmentId });
+      } else if (status === 'invoice_pending' || status === 'handling') {
+        console.log(
+          `Shipment ${shipmentId} (order ${order.id}) status is ${status}. Requesting label generation...`
+        );
+        try {
+          await meli.requestLabelGeneration(shipmentId);
+        } catch (err) {
+          console.log(
+            `Failed to request label generation for shipment ${shipmentId} (order ${order.id}): ${
+              err instanceof Error ? err.message : err
+            }`
+          );
+        }
+        notReady++;
       } else {
         notReady++;
       }
@@ -77,6 +91,8 @@ export async function collectPendingShipments(
 
 /**
  * Download one PDF per shipment so each label is a separate file.
+ * If the label isn't printable yet (e.g. invoice_pending), request generation
+ * and skip for now - it should be ready on the next run.
  */
 export async function generateLabelPdfs(
   shipments: PrintableShipment[],
@@ -95,11 +111,32 @@ export async function generateLabelPdfs(
       );
       fs.writeFileSync(filePath, pdf);
       labels.push({ ...shipment, filePath });
+      continue;
     } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
       console.log(
-        `Failed to download label for order ${shipment.orderId}: ` +
-          `${err instanceof Error ? err.message : err}`
+        `Failed to download label for order ${shipment.orderId}: ${msg}`
       );
+
+      if (
+        msg.includes('NOT_PRINTABLE_STATUS') ||
+        msg.includes('invoice_pending') ||
+        msg.includes('SHPLAB0200')
+      ) {
+        console.log(
+          `Requesting label generation for shipment ${shipment.shipmentId} (order ${shipment.orderId})...`
+        );
+        try {
+          await meli.requestLabelGeneration(shipment.shipmentId);
+        } catch (genErr) {
+          console.log(
+            `Failed to request label generation for shipment ${shipment.shipmentId}: ${
+              genErr instanceof Error ? genErr.message : genErr
+            }`
+          );
+        }
+        // Don't fail the whole run - label will be generated and downloadable next time
+      }
     }
   }
 
