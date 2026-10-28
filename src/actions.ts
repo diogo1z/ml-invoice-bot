@@ -129,22 +129,112 @@ export async function testEmailDelivery(): Promise<void> {
  * are skipped, so the same label is never emailed twice.
  */
 export async function sendLabelsByEmail(): Promise<void> {
-  console.log('\nChecking Mercado Livre for paid orders with pending shipments...');
+  console.log('\n[FLUXO 1/2] Verificando pedidos pagos, gerando DC-e e solicitando etiquetas...');
   const meli = new MercadoLivreClient();
   const orders = await meli.fetchPaidOrders(config.labelsMaxOrders);
-  const result = await collectPendingShipments(orders, meli);
 
-  console.log(`Paid orders checked: ${result.totalPaidOrders}`);
-  console.log(`Already sent: ${result.alreadySent}`);
-  console.log(`Not ready to ship: ${result.notReady}`);
-  console.log(`Without shipping info: ${result.withoutShipping}`);
-  if (result.errors > 0) {
-    console.log(`Errors while checking shipments: ${result.errors}`);
+  let triggered = 0;
+
+  for (const order of orders) {
+    const shipmentId = order.shipping?.id;
+    if (!shipmentId) continue;
+    const orderIdStr = String(order.id);
+
+    try {
+      const { isLabelSent } = await import('./db');
+      if (await isLabelSent(shipmentId)) continue;
+    } catch {}
+
+    try {
+      const shipment: any = typeof (meli as any).getShipment === 'function'
+        ? await (meli as any).getShipment(shipmentId)
+        : null;
+
+      const status = shipment?.status ?? (await meli.fetchShipmentStatus(shipmentId).catch(() => undefined));
+      const substatus = shipment?.substatus;
+
+      if (
+        substatus === 'invoice_pending' ||
+        status === 'invoice_pending' ||
+        (status === 'ready_to_ship' && substatus === 'invoice_pending')
+      ) {
+        console.log(`  [GERAR] Pedido ${orderIdStr} | Envio ${shipmentId} | status=${status} | substatus=${substatus}`);
+        try {
+          if (typeof (meli as any).emitContentDeclaration === 'function') {
+            await (meli as any).emitContentDeclaration(orderIdStr);
+            console.log(`    - DC-e solicitada/emitida para pedido ${orderIdStr}`);
+          }
+        } catch (err) {
+          console.log(`    - Falha ao solicitar DC-e: ${err instanceof Error ? err.message : err}`);
+        }
+        try {
+          if (typeof (meli as any).requestLabelGeneration === 'function') {
+            await (meli as any).requestLabelGeneration(shipmentId);
+            console.log(`    - Geração da etiqueta solicitada para envio ${shipmentId}`);
+          }
+        } catch (err) {
+          console.log(`    - Falha ao solicitar geração da etiqueta: ${err instanceof Error ? err.message : err}`);
+        }
+        // Também tenta forçar refresh do envio
+        try {
+          if (typeof (meli as any).getShipment === 'function') {
+            await (meli as any).getShipment(shipmentId);
+          }
+        } catch {}
+        triggered++;
+        continue;
+      }
+    } catch (err) {
+      console.log(`  [AVISO] Não foi possível analisar envio ${shipmentId} (pedido ${orderIdStr}): ${err instanceof Error ? err.message : err}`);
+    }
   }
-  console.log(`Orders still to ship: ${result.pending.length}`);
+
+  console.log(`[FLUXO 1/2] Concluído. ${triggered} envio(s) com pendência tiveram DC-e/etiqueta gerados/solicitados nesta execução.\n`);
+
+  console.log('[FLUXO 2/2] Verificando o que ja esta pronto para baixar e enviar nesta execucao...');
+  const { isLabelSent } = await import('./db');
+  const readyNow: Array<{orderId: string, shipmentId: number}> = [];
+
+  for (const order of orders) {
+    const shipmentId = order.shipping?.id;
+    if (!shipmentId) continue;
+    const orderIdStr = String(order.id);
+    try {
+      if (await isLabelSent(shipmentId)) continue;
+      const shipment: any = typeof (meli as any).getShipment === 'function'
+        ? await (meli as any).getShipment(shipmentId)
+        : null;
+      const status = shipment?.status;
+      const substatus = shipment?.substatus;
+      if (status === 'ready_to_ship' && substatus !== 'invoice_pending') {
+        readyNow.push({ orderId: orderIdStr, shipmentId });
+        console.log(`  [PRONTO AGORA] Pedido ${orderIdStr} | Envio ${shipmentId} | status=${status} | substatus=${substatus}`);
+      }
+    } catch {}
+  }
+
+  const result: any = await collectPendingShipments(orders, meli);
+  if (readyNow.length > 0) {
+    const existing = new Set((result.pending || []).map((p: any) => p.shipmentId));
+    for (const r of readyNow) {
+      if (!existing.has(r.shipmentId)) result.pending.push(r);
+    }
+  } else if (result.pending && result.pending.length > 0) {
+    // keep as is
+  }
+
+  console.log(`  Paid orders checked: ${result.totalPaidOrders}`);
+  console.log(`  Already sent: ${result.alreadySent}`);
+  console.log(`  Not ready to ship: ${result.notReady}`);
+  console.log(`  Without shipping info: ${result.withoutShipping}`);
+  if (result.errors > 0) {
+    console.log(`  Errors while checking shipments: ${result.errors}`);
+  }
+  console.log(`  Orders still to ship (prontos agora): ${result.pending.length}`);
 
   if (result.pending.length === 0) {
-    console.log('No new labels to send.\n');
+    console.log('\nNenhuma etiqueta pronta para envio nesta execucao.');
+    console.log('As que foram solicitadas no fluxo 1/2 devem ficar prontas em breve e serao enviadas na proxima rodada.\n');
     return;
   }
 
@@ -152,17 +242,16 @@ export async function sendLabelsByEmail(): Promise<void> {
     throw new Error('LABELS_EMAIL_TO is not configured.');
   }
 
-  console.log(`Downloading ${result.pending.length} label(s), one PDF per order...`);
+  console.log(`\nBaixando ${result.pending.length} etiqueta(s) pronta(s), uma por pedido...`);
   const labels = await generateLabelPdfs(result.pending, meli);
   const failed = result.pending.length - labels.length;
   if (labels.length === 0) {
-    console.log('No printable labels available right now.');
-    console.log('This usually means shipments were already dropped off/shipped or are not printable.');
-    console.log('Nothing sent.\n');
+    console.log('Nenhuma etiqueta imprimivel foi baixada nesta execucao.');
+    console.log('Nada enviado.\n');
     return;
   }
   if (failed > 0) {
-    console.log(`Warning: ${failed} label(s) could not be generated; they will be retried.`);
+    console.log(`Aviso: ${failed} etiqueta(s) nao foram baixadas agora e ficaram pendentes.`);
   }
 
   const to = config.email.labelsTo.join(', ');
@@ -187,10 +276,10 @@ export async function sendLabelsByEmail(): Promise<void> {
     '',
     sections.join('\n\n'),
     '',
-    'As etiquetas estão em anexo, uma por pedido.',
+    'As etiquetas estao em anexo, uma por pedido.',
   ].join('\n');
 
-  console.log(`Sending ${labels.length} separate label PDF(s) to ${to}...`);
+  console.log(`Enviando ${labels.length} PDF(s) de etiqueta por email para ${to}...`);
   await sendFilesByEmail(
     labels.map((label) => label.filePath),
     subject,
@@ -207,11 +296,11 @@ export async function sendLabelsByEmail(): Promise<void> {
     }))
   );
 
-  console.log(`Email sent. ${labels.length} label(s) marked as sent in the database.\n`);
+  console.log(`Email enviado. ${labels.length} etiqueta(s) marcada(s) como enviadas no banco.\n`);
   if (failed > 0) {
     console.log(
-      `${failed} label(s) could not be generated. ` +
-        'The successful ones were sent; the rest will be retried.'
+      `${failed} etiqueta(s) nao foram enviadas nesta execucao. ` +
+        'Elas serao tentadas novamente quando ficarem prontas.'
     );
     return;
   }

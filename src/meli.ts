@@ -140,76 +140,236 @@ export class MercadoLivreClient {
   }
 
   /**
+   * Download content declaration (declaração de conteúdo) for shipments if available.
+   */
+  async fetchContentDeclaration(shipmentIds: number[]): Promise<Buffer | null> {
+    if (shipmentIds.length === 0) return null;
+    const token = await this.ensureToken();
+
+    const urls = [
+      `${MELI_API}/shipment_labels?shipment_ids=${shipmentIds.join(',')}&response_type=pdf&document_type=content_declaration`,
+      `${MELI_API}/shipments/${shipmentIds[0]}/content-declaration?format=pdf`,
+      `${MELI_API}/shipments/${shipmentIds[0]}/documents/content-declaration/pdf`,
+    ];
+
+    for (const url of urls) {
+      try {
+        const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+        if (res.ok) {
+          const buf = Buffer.from(await res.arrayBuffer());
+          if (buf.length > 1000) return buf;
+        }
+      } catch {}
+    }
+    return null;
+  }
+
+  async getShipment(shipmentId: number): Promise<any> {
+    return this.request<any>(`/shipments/${shipmentId}`);
+  }
+
+  /**
+   * Emit "Declaração de Conteúdo" for shipments that require it.
+   * In Mercado Livre app this appears as "Emitir declaração de conteúdo".
+   */
+  async emitContentDeclaration(orderId: string): Promise<void> {
+    const token = await this.ensureToken();
+
+    const url = `${MELI_API}/mlb/order/${encodeURIComponent(orderId)}/dce/emission`;
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+
+    const body = await res.text();
+
+    if (res.status === 409 || res.status === 422) {
+      console.log(
+        `DC-e emission already in progress or not applicable for order ${orderId} (${res.status})`
+      );
+      return;
+    }
+
+    if (!res.ok) {
+      throw new Error(`DC-e emission failed (${res.status}): ${body}`);
+    }
+
+    console.log(`DC-e emission started for order ${orderId}`);
+  }
+
+  async fetchContentDeclaration(orderId: string): Promise<Buffer | null> {
+    const token = await this.ensureToken();
+
+    const infoUrl = `${MELI_API}/mlb/order/${encodeURIComponent(orderId)}/dce/info`;
+    const infoRes = await fetch(infoUrl, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+
+    if (infoRes.status === 404) {
+      return null;
+    }
+
+    if (!infoRes.ok) {
+      throw new Error(`DC-e status failed (${infoRes.status}): ${await infoRes.text()}`);
+    }
+
+    const info = (await infoRes.json()) as {
+      status?: string;
+      documents?: Array<{
+        dce_key: string;
+        document_type?: string;
+        status?: string;
+      }>;
+    };
+
+    if (info.status && info.status !== 'completed' && info.status !== 'COVERED') {
+      console.log(`DC-e for order ${orderId} is not ready: ${info.status}`);
+      return null;
+    }
+
+    const document = info.documents?.find(
+      (doc) =>
+        (doc.document_type === 'DCE' || doc.document_type === 'CONTENT_DECLARATION') &&
+        (doc.status === 'issued' || doc.status === 'authorized' || doc.status === 'completed' || doc.status === 'COVERED')
+    ) || info.documents?.find(
+      (doc) => doc.status === 'issued' || doc.status === 'authorized' || doc.status === 'completed'
+    );
+
+    if (!document || !document.dce_key) {
+      console.log(`No issued DC-e found for order ${orderId}`);
+      return null;
+    }
+
+    const downloadUrl =
+      `${MELI_API}/mlb/order/${encodeURIComponent(orderId)}/dce/info/${encodeURIComponent(
+        document.dce_key
+      )}?doctype=pdf`;
+
+    const pdfRes = await fetch(downloadUrl, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+
+    if (!pdfRes.ok) {
+      throw new Error(`DC-e download failed (${pdfRes.status}): ${await pdfRes.text()}`);
+    }
+
+    return Buffer.from(await pdfRes.arrayBuffer());
+  }
+
+  // Keep backward compatibility
+  async emitContentDeclarationByShipment(shipmentId: number): Promise<void> {
+    try {
+      const shipment = await this.getShipment(shipmentId);
+      if (shipment?.order_id) {
+        await this.emitContentDeclaration(String(shipment.order_id));
+      }
+    } catch (err) {
+      console.log(
+        `Could not emit content declaration for shipment ${shipmentId}: ${
+          err instanceof Error ? err.message : err
+        }`
+      );
+    }
+  }
+
+  /**
    * Request Mercado Livre to generate/print the label for a shipment.
-   * For shipments in `invoice_pending`, try multiple endpoints to force generation.
+   * For shipments in `invoice_pending`, try to force generation via multiple approaches.
    */
   async requestLabelGeneration(shipmentId: number): Promise<void> {
     const token = await this.ensureToken();
+    const headersJson = {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+    };
 
-    const attempts: Array<{ method: string; url: string; body?: string }> = [
-      { method: 'GET', url: `${MELI_API}/shipments/${shipmentId}/labels?response_type=pdf` },
-      { method: 'GET', url: `${MELI_API}/shipments/${shipmentId}/labels` },
-      { method: 'POST', url: `${MELI_API}/shipments/${shipmentId}/label` },
-      { method: 'POST', url: `${MELI_API}/shipments/${shipmentId}/labels` },
-      { method: 'POST', url: `${MELI_API}/shipments/${shipmentId}/labels/generate` },
-      { method: 'PUT', url: `${MELI_API}/shipments/${shipmentId}/labels` },
-      {
-        method: 'POST',
-        url: `${MELI_API}/shipment_labels`,
-        body: JSON.stringify({ shipment_ids: [shipmentId], response_type: 'pdf' }),
+    // Emit content declaration first if needed
+    await this.emitContentDeclaration(shipmentId);
+    await new Promise((r) => setTimeout(r, 2000));
+
+    const attempts: Array<() => Promise<void>> = [
+      async () => {
+        const res = await fetch(`${MELI_API}/shipment_labels?shipment_ids=${shipmentId}&response_type=pdf`, {
+          method: 'POST',
+          headers: headersJson,
+          body: JSON.stringify({}),
+        });
+        if (res.ok) {
+          console.log(`Label generation requested via POST /shipment_labels?shipment_ids=...`);
+          return;
+        }
       },
-      {
-        method: 'POST',
-        url: `${MELI_API}/shipment_labels/generate`,
-        body: JSON.stringify({ shipment_ids: [shipmentId] }),
+      async () => {
+        const res = await fetch(`${MELI_API}/shipment_labels`, {
+          method: 'POST',
+          headers: headersJson,
+          body: JSON.stringify({
+            shipment_ids: [shipmentId],
+            response_type: 'pdf',
+            print_format: 'A4',
+          }),
+        });
+        if (res.ok) {
+          console.log(`Label generation requested via POST /shipment_labels (with print_format)`);
+          return;
+        }
+        const t = await res.text().catch(() => '');
+        if (res.status === 409 || res.status === 422) {
+          console.log(`Label generation already requested/in progress (${res.status})`);
+          return;
+        }
+      },
+      async () => {
+        const res = await fetch(`${MELI_API}/shipments/${shipmentId}/labels`, {
+          method: 'POST',
+          headers: headersJson,
+          body: JSON.stringify({ response_type: 'pdf', format: 'pdf', print_format: 'A4' }),
+        });
+        if (res.ok) {
+          console.log(`Label generation requested via POST /shipments/${shipmentId}/labels`);
+          return;
+        }
+      },
+      async () => {
+        const res = await fetch(`${MELI_API}/shipments/${shipmentId}/label`, {
+          method: 'POST',
+          headers: headersJson,
+          body: JSON.stringify({ response_type: 'pdf' }),
+        });
+        if (res.ok) {
+          console.log(`Label generation requested via POST /shipments/${shipmentId}/label`);
+          return;
+        }
+      },
+      async () => {
+        const res = await fetch(`${MELI_API}/shipment_labels/generate`, {
+          method: 'POST',
+          headers: headersJson,
+          body: JSON.stringify({
+            shipment_ids: [shipmentId],
+            response_type: 'pdf',
+          }),
+        });
+        if (res.ok) {
+          console.log(`Label generation requested via POST /shipment_labels/generate`);
+          return;
+        }
       },
     ];
 
-    for (const attempt of attempts) {
+    for (const fn of attempts) {
       try {
-        const res = await fetch(attempt.url, {
-          method: attempt.method,
-          headers: {
-            Authorization: `Bearer ${token}`,
-            'Content-Type': 'application/json',
-            Accept: 'application/json',
-          },
-          body: attempt.body,
-        });
-
-        if (res.ok) {
-          console.log(
-            `Label generation requested via ${attempt.method} ${attempt.url.replace(MELI_API, '')}`
-          );
-          // give ML a moment and refresh
-          await this.request<{ status: string }>(`/shipments/${shipmentId}`).catch(() => {});
-          return;
-        }
-
-        const text = await res.text().catch(() => '');
-        if (res.status === 409 || res.status === 422) {
-          console.log(
-            `Label generation already requested or in progress for shipment ${shipmentId} (${res.status})`
-          );
-          await this.request<{ status: string }>(`/shipments/${shipmentId}`).catch(() => {});
-          return;
-        }
-
-        if (res.status !== 404 && res.status !== 405 && res.status !== 500) {
-          console.log(
-            `${attempt.method} ${attempt.url.replace(MELI_API, '')} -> ${res.status}: ${text.slice(0, 120)}`
-          );
-        }
-      } catch (err) {
-        // ignore network errors for attempts
-      }
+        await fn();
+        await new Promise((r) => setTimeout(r, 1500));
+      } catch {}
     }
 
     try {
-      await this.request<{ status: string }>(`/shipments/${shipmentId}`);
-      console.log(
-        `Shipment ${shipmentId} refreshed. Label will be generated by Mercado Livre and should be printable on the next run.`
-      );
+      const s = await this.request<{ status: string }>(`/shipments/${shipmentId}`);
+      console.log(`Shipment ${shipmentId} status after generation request: ${s.status}`);
     } catch (err) {
       console.log(
         `Could not refresh shipment ${shipmentId}: ${
